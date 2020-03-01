@@ -1,6 +1,6 @@
 /******************************************************************************************
 *
-*  Copyright 2020 Pierre Voigtl�nder(jeanreP)
+*  Copyright 2020 Pierre Voigtlaender(jeanreP)
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy of this
 * software and associated documentation files(the "Software"), to deal in the Software
@@ -1126,6 +1126,7 @@ struct Service::Impl : public ServiceDescription
         _multicast_socket.sendDataTo(_response_message.c_str(),
             address_to,
             _port);
+        LSSDP_LOG_DEBUG_MESSAGE(std::string("send response: ") + _response_message);
     }
     
 
@@ -1193,6 +1194,7 @@ bool Service::checkForMSearchAndSendResponse(std::chrono::milliseconds timeout)
     FD_ZERO(&fs);
     FD_SET(_impl->_multicast_socket._socket, &fs);
     struct timeval tv;
+    memset(&tv, 0, sizeof(tv));
     tv.tv_usec = 100 * 1000;   // 100 ms
 
     auto begin_time = std::chrono::system_clock::now();
@@ -1228,7 +1230,7 @@ bool Service::checkForMSearchAndSendResponse(std::chrono::milliseconds timeout)
         }
 
         //timeout check
-        if ((std::chrono::system_clock::now() - begin_time) > timeout)
+        if ((std::chrono::system_clock::now() - begin_time) >= timeout)
         {
             go_ahead = false;
         }
@@ -1240,6 +1242,11 @@ bool Service::checkForMSearchAndSendResponse(std::chrono::milliseconds timeout)
 bool Service::operator==(const ServiceDescription& other) const
 {
     return (other == *_impl.get());
+}
+
+ServiceDescription Service::getServiceDescription() const
+{
+    return *_impl;
 }
 
 
@@ -1411,6 +1418,7 @@ bool ServiceFinder::checkForServices(const std::function<void(const ServiceUpdat
     FD_ZERO(&fs);
     FD_SET(_impl->_multicast_socket._socket, &fs);
     struct timeval tv;
+    memset(&tv, 0, sizeof(tv));
     tv.tv_usec = 100 * 1000;   // 100 ms
 
     auto begin_time = std::chrono::system_clock::now();
@@ -1434,12 +1442,13 @@ bool ServiceFinder::checkForServices(const std::function<void(const ServiceUpdat
             std::pair<bool, LSSDPPacket> packet = _impl->_multicast_socket.receivePacket();
             if (packet.first)
             {
+                bool package_interest = true;
                 if (!_impl->_device_type_filter.empty())
                 {
                     if (strcmp(packet.second._device_type, _impl->_device_type_filter.c_str()) != 0)
                     {
                         //its not out device looking for
-                        continue;
+                        package_interest = false;
                     }
                 }
                 if (!_impl->_search_target.empty() && _impl->_search_target != std::string(LSSDP_SEARCH_TARGET_ALL))
@@ -1447,48 +1456,51 @@ bool ServiceFinder::checkForServices(const std::function<void(const ServiceUpdat
                     if (strcmp(packet.second._st, _impl->_search_target.c_str()) != 0)
                     {
                         //its not our target looking for
-                        continue;
+                        package_interest = false;
                     }
                 }
-                if (strcmp(packet.second._method, LSSDP_NOTIFY) == 0)
+                if (package_interest)
                 {
-                    ServiceUpdateEvent event;
-                    event._event_id = ServiceUpdateEvent::notify_alive;
-                    if (strcmp(packet.second._nts, LSSDP_NOTIFY_NTS_ALIVE) == 0)
+                    if (strcmp(packet.second._method, LSSDP_NOTIFY) == 0)
                     {
+                        ServiceUpdateEvent event;
                         event._event_id = ServiceUpdateEvent::notify_alive;
+                        if (strcmp(packet.second._nts, LSSDP_NOTIFY_NTS_ALIVE) == 0)
+                        {
+                            event._event_id = ServiceUpdateEvent::notify_alive;
+                        }
+                        else if (strcmp(packet.second._nts, LSSDP_NOTIFY_NTS_BYEBYE) == 0)
+                        {
+                            event._event_id = ServiceUpdateEvent::notify_byebye;
+                        }
+                        event._service_description = ServiceDescription(packet.second._location,
+                            packet.second._usn,
+                            packet.second._st,
+                            "",
+                            "",
+                            packet.second._sm_id,
+                            packet.second._device_type);
+                        update_callback(event);
                     }
-                    else if (strcmp(packet.second._nts, LSSDP_NOTIFY_NTS_BYEBYE) == 0)
+                    else if (strcmp(packet.second._method, LSSDP_RESPONSE) == 0)
                     {
-                        event._event_id = ServiceUpdateEvent::notify_byebye;
+                        ServiceUpdateEvent event;
+                        event._event_id = ServiceUpdateEvent::response;
+                        event._service_description = ServiceDescription(packet.second._location,
+                            packet.second._usn,
+                            packet.second._st,
+                            "",
+                            "",
+                            packet.second._sm_id,
+                            packet.second._device_type);
+                        update_callback(event);
                     }
-                    event._service_description = ServiceDescription(packet.second._location,
-                        packet.second._usn,
-                        packet.second._st,
-                        "",
-                        "",
-                        packet.second._sm_id,
-                        packet.second._device_type);
-                    update_callback(event);
-                }
-                else if (strcmp(packet.second._method, LSSDP_RESPONSE) == 0)
-                {
-                    ServiceUpdateEvent event;
-                    event._event_id = ServiceUpdateEvent::response;
-                    event._service_description = ServiceDescription(packet.second._location,
-                        packet.second._usn,
-                        packet.second._st,
-                        "",
-                        "",
-                        packet.second._sm_id,
-                        packet.second._device_type);
-                    update_callback(event);
                 }
             }
         }
-
+        
         //timeout check
-        if ((std::chrono::system_clock::now() - begin_time) > timeout)
+        if ((std::chrono::system_clock::now() - begin_time) >= timeout)
         {
             go_ahead = false;
         }

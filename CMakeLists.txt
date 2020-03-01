@@ -33,6 +33,8 @@ if (${lssdpcpp_enable_tests})
    add_subdirectory(test)
 endif()
 
+add_subdirectory(examples)
+
 include(CMakePackageConfigHelpers)
 configure_package_config_file(lssdpcpp-config.cmake.in
                               ${CMAKE_CURRENT_BINARY_DIR}/lssdpcpp-config.cmake

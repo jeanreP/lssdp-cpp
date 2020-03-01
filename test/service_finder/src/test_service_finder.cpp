@@ -1,6 +1,6 @@
 /******************************************************************************************
 *
-*  Copyright 2020 Pierre Voigtl�nder(jeanreP)
+*  Copyright 2020 Pierre Voigtlaender(jeanreP)
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy of this
 * software and associated documentation files(the "Software"), to deal in the Software
@@ -92,17 +92,21 @@ TEST_CASE("TestServiceFinder", "checkForServices")
                 last_time_for_m_search = system_clock::now();
 
                 //update every 5 seconds
-                REQUIRE_NOTHROW(finder.sendMSearch());
-                REQUIRE_NOTHROW(service1.sendNotifyAlive());
-                REQUIRE_NOTHROW(service2.sendNotifyAlive());
-
                 std::cout << "send m search" << std::endl;
+                REQUIRE_NOTHROW(finder.sendMSearch());
+                std::cout << "send service 1 alive" << std::endl;
+                REQUIRE_NOTHROW(service1.sendNotifyAlive());
+                std::cout << "send service 2 alive" << std::endl;
+                REQUIRE_NOTHROW(service2.sendNotifyAlive());
             }
             auto did_throw = false;
             try
             {
+                std::cout << "look for responding 1" << std::endl;
                 auto ret_check_msearch1 = service1.checkForMSearchAndSendResponse(seconds(1));
+                std::cout << "look for responding 2" << std::endl;
                 auto ret_check_msearch2 = service2.checkForMSearchAndSendResponse(seconds(1));
+                std::cout << "check for services" << std::endl;
                 auto ret_check_finder  = finder.checkForServices(
                     [&](const ServiceFinder::ServiceUpdateEvent& update_event)
                     {
@@ -113,6 +117,7 @@ TEST_CASE("TestServiceFinder", "checkForServices")
             }
             catch (std::runtime_error&)
             {
+                std::cout << "did throw" << std::endl;
                 did_throw = true;
             }
             REQUIRE_FALSE(did_throw);
