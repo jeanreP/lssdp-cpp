@@ -26,16 +26,37 @@
 #include <string.h>
 #include <string>
 #include <iostream>
+#include <map>
 
 #ifdef WIN32
 #include <WinSock2.h>
-#include <Ws2def.h>
+
 #include <iphlpapi.h>
 #include <heapapi.h>
 #include <ws2tcpip.h>
 #pragma warning( disable : 4996 )
 
 #define SOCKET_TYPE SOCKET
+#define ssize_t     int
+
+namespace {
+std::string getErrorAsString()
+{
+    auto err = WSAGetLastError();
+    char msgbuf[256];
+    msgbuf[0] = '\0';
+
+    FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,   // flags
+        NULL,                // lpsource
+        err,                 // message id
+        MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),    // languageid
+        msgbuf,              // output buffer
+        sizeof(msgbuf),     // size of msgbuf, bytes
+        NULL);               // va_list of arguments
+    std::string error_string = std::string(msgbuf) + " (" + std::to_string(err) + ")";
+    return std::move(error_string);
+}
+}
 
 #else //WIN32
 #include <unistd.h>     // close
@@ -50,6 +71,14 @@
 #ifndef _SIZEOF_ADDR_IFREQ
 #define _SIZEOF_ADDR_IFREQ sizeof
 #endif
+
+namespace {
+std::string getErrorAsString()
+{
+    std::string error_string = std::string(strerror(errno)) + " (" + std::to_string(errno) + ")";
+    return std::move(error_string);
+}
+}
 
 #endif //WIN32
 
@@ -82,15 +111,25 @@ namespace
     constexpr size_t LSSDP_FIELD_LEN = 128;
     constexpr size_t LSSDP_LOCATION_LEN = 256;
 
-    constexpr bool debug_enabled = false;
+    //option for receiving from my host
+    constexpr bool LSSDP_RECEIVE_PACKETS_FROM_MYSELF = true;
+    //option for sending to my host
+    constexpr bool LSSDP_SEND_TO_LOCALHOST = true;
+}
 
+//#define LSSDP_DEBUGGING_ON
+#ifdef LSSDP_DEBUGGING_ON
+namespace
+{
     void logDebugMessage(const std::string& message)
     {
         std::cout << message << std::endl;
     }
 }
-
-#define LSSDP_LOG_DEBUG_MESSAGE(_expr_) do { if (debug_enabled) { logDebugMessage( _expr_ );  } } while(false)
+#define LSSDP_LOG_DEBUG_MESSAGE(_expr_) do { logDebugMessage( _expr_ );  } while(false)
+#else //LSSDP_DEBUGGING_ON
+#define LSSDP_LOG_DEBUG_MESSAGE(_expr_) 
+#endif
 
 namespace lssdp
 {
@@ -234,7 +273,7 @@ struct LSSDPPacket
             return false;
         }
 
-        if (colon == end)
+        if (colon == static_cast<int>(end))
         {
             // value is empty
             return true;
@@ -320,11 +359,11 @@ struct LSSDPPacket
     }
 
     int trim_spaces(const char * string, size_t * start, size_t * end) {
-        int i = *start;
-        int j = *end;
+        int i = static_cast<int>(*start);
+        int j = static_cast<int>(*end);
 
-        while (i <= *end && (!isprint(string[i]) || isspace(string[i]))) i++;
-        while (j >= *start && (!isprint(string[j]) || isspace(string[j]))) j--;
+        while (i <= static_cast<int>(*end) && (!isprint(string[i]) || isspace(string[i]))) i++;
+        while (j >= static_cast<int>(*start) && (!isprint(string[j]) || isspace(string[j]))) j--;
 
         if (i > j) {
             return -1;
@@ -356,10 +395,18 @@ private:
         GetVersionEx(&vi);
         _os_version = std::to_string(vi.dwMajorVersion) + "." + std::to_string(vi.dwMinorVersion);
 #elif __linux__
-        //struct utsname ;
-       // uname(struct utsname *buf);
-        _os_name = "Linux";
-        _os_version = "version";
+        struct utsname buf;
+        int retval = uname(&buf);
+        if (0 == retval)
+        {
+            _os_name = buf.sysname;
+            _os_version = buf.release;
+        }
+        else
+        {
+            _os_name = "Linux";
+            _os_version = "version";
+        }
 #elif __unix__
         _os_name = "unix";
         _os_version = "version";
@@ -491,15 +538,13 @@ bool updateNetworkInterfaces(std::vector<NetworkInterface>& interfaces)
 
     std::vector<NetworkInterface> new_interfaces;
 
-    int result = -1;
-
 #ifdef WIN32
     #define WORKING_BUFFER_SIZE 15000
     #define MAX_TRIES 3
 
     #define MALLOC(x) HeapAlloc(GetProcessHeap(), 0, (x))
     #define FREE(x) HeapFree(GetProcessHeap(), 0, (x))
-    DWORD dwSize = 0;
+
     DWORD dwRetVal = 0;
 
     ULONG byte_size_of_adapters_info = 1 * sizeof(IP_ADAPTER_INFO);
@@ -550,7 +595,6 @@ bool updateNetworkInterfaces(std::vector<NetworkInterface>& interfaces)
         
     }
     FREE(p_adaptersinfo);
-    result = 0;
 
 #else //WIN32
     /* Reference to this article:
@@ -562,7 +606,7 @@ bool updateNetworkInterfaces(std::vector<NetworkInterface>& interfaces)
     if (fd < 0) 
     {
         throw std::runtime_error(std::string("create socket failed, errno = ") 
-                                 + strerror(errno) + " (" + std::to_string(errno) + ")");
+                                 + getErrorAsString());
     }
 #define LOCAL_BUFFER_LEN    2048
     // get ifconfig
@@ -574,11 +618,11 @@ bool updateNetworkInterfaces(std::vector<NetworkInterface>& interfaces)
     if (ioctl(fd, SIOCGIFCONF, &ifc) < 0)
     {
         throw std::runtime_error(std::string("ioctl SIOCGIFCONF failed, errno = ") 
-                                 + strerror(errno) + " (" + std::to_string(errno) + ")");
+                                 + getErrorAsString());
     }
 
     // set to new interfaces 
-    size_t i;
+    int i;
     struct ifreq * ifr;
     for (i = 0; i < ifc.ifc_len; i += _SIZEOF_ADDR_IFREQ(*ifr))
     {
@@ -609,7 +653,7 @@ bool updateNetworkInterfaces(std::vector<NetworkInterface>& interfaces)
     if (fd >= 0 && close(fd) != 0)
     {
        throw std::runtime_error(std::string("closing of socket failed, errno = ") 
-                                 + strerror(errno) + " (" + std::to_string(errno) + ")");
+                                 + getErrorAsString());
     }
 
 #endif //WIN32
@@ -721,44 +765,49 @@ public:
         _multicast_socket_port = multicast_socket_port;
 
         // create UDP socket
-        _socket = socket(AF_INET, SOCK_DGRAM, 0);
+        _socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
         if (_socket < 0) 
         {
+            std::string throw_msg = std::string("create socket failed, errno = ")
+                + getErrorAsString();
             close();
-            throw std::runtime_error(std::string("create socket failed, errno = ")
-                + strerror(errno) + " (" + std::to_string(errno) + ")");
+            throw std::runtime_error(throw_msg);
         }
 
 #ifdef WIN32
         u_long mode = 1;
         if (ioctlsocket(_socket, FIONBIO, &mode) != 0)
         {
+            std::string throw_msg = std::string("ioctl FIONBIO failed, errno = ")
+                + getErrorAsString();
             close();
-            throw std::runtime_error(std::string("ioctl FIONBIO failed, errno = ")
-                + strerror(errno) + " (" + std::to_string(errno) + ")");
+            throw std::runtime_error(throw_msg);
         }
         // set reuse address
-        char opt = 1;
-        if (setsockopt(_socket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) != 0)
+        int opt = 1;
+        if (setsockopt(_socket, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt)) != 0)
         {
+            std::string throw_msg = std::string("setsockopt SO_REUSEADDR failed, errno = ")
+                + getErrorAsString();
             close();
-            throw std::runtime_error(std::string("setsockopt SO_REUSEADDR failed, errno = ")
-                + strerror(errno) + " (" + std::to_string(errno) + ")");
+            throw std::runtime_error(throw_msg);
         }
 #else // WIN32
         int opt = 1;
         if (ioctl(_socket, FIONBIO, &opt) != 0)
         {
+            std::string throw_msg = std::string("ioctl FIONBIO failed, errno = ")
+                + getErrorAsString();
             close();
-            throw std::runtime_error(std::string("ioctl FIONBIO failed, errno = ")
-                + strerror(errno) + " (" + std::to_string(errno) + ")");
+            throw std::runtime_error(throw_msg);
         }
         // set reuse address
         if (setsockopt(_socket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) != 0)
         {
+            std::string throw_msg = std::string("setsockopt SO_REUSEADDR failed, errno = ")
+                + getErrorAsString();
             close();
-            throw std::runtime_error(std::string("setsockopt SO_REUSEADDR failed, errno = ")
-                + strerror(errno) + " (" + std::to_string(errno) + ")");
+            throw std::runtime_error(throw_msg);
         }
 #endif // WIN32
 
@@ -769,66 +818,74 @@ public:
         int sock_opt = fcntl(_socket, F_GETFD);
         if (sock_opt == -1)
         {
+            std::string throw_msg = std::string("fcntl F_GETFD failed, errno = ")
+                + getErrorAsString();
             close();
-            throw std::runtime_error(std::string("fcntl F_GETFD failed, errno = ")
-                + strerror(errno) + " (" + std::to_string(errno) + ")");
+            throw std::runtime_error(throw_msg);
         }
         else
         {
             // F_SETFD
             if (fcntl(_socket, F_SETFD, sock_opt | FD_CLOEXEC) == -1)
             {
+                std::string throw_msg = std::string("fcntl F_SETFD FD_CLOEXEC failed, errno = ")
+                    + getErrorAsString();
                 close();
-                throw std::runtime_error(std::string("fcntl F_SETFD FD_CLOEXEC failed, errno = ")
-                    + strerror(errno) + " (" + std::to_string(errno) + ")");
+                throw std::runtime_error(throw_msg);
             }
         }
 #endif
         // bind socket
         struct sockaddr_in addr;
+        memset(&addr, 0, sizeof(addr));
         addr.sin_family = AF_INET;
         addr.sin_port = htons(multicast_socket_port);
         addr.sin_addr.s_addr = htonl(INADDR_ANY);
         
         if (bind(_socket, (struct sockaddr *)&addr, sizeof(addr)) != 0)
         {
+            std::string throw_msg = std::string("bind failed to ADDR ANY for multicast, errno = ")
+                + getErrorAsString();
             close();
-            throw std::runtime_error(std::string("bind failed, errno = ")
-                + strerror(errno) + " (" + std::to_string(errno) + ")");
+            throw std::runtime_error(throw_msg);
         }
 
         struct in_addr multicast_address;
+        memset(&multicast_address, 0, sizeof(multicast_address));
         multicast_address.s_addr = multicast_socket_addr;
 
         // set IP_ADD_MEMBERSHIP
         struct ip_mreq imr;
+        memset(&imr, 0, sizeof(imr));
         imr.imr_multiaddr.s_addr = multicast_address.s_addr;
         imr.imr_interface.s_addr = htonl(INADDR_ANY);
         
 #ifdef WIN32
         if (setsockopt(_socket, IPPROTO_IP, IP_ADD_MEMBERSHIP, (const char*)&imr, sizeof(imr)) != 0)
         {
+            std::string throw_msg = std::string("setsockopt IP_ADD_MEMBERSHIP failed, errno = ")
+                + getErrorAsString();
             close();
-            throw std::runtime_error(std::string("setsockopt IP_ADD_MEMBERSHIP failed, errno = ")
-                + strerror(errno) + " (" + std::to_string(errno) + ")");
+            throw std::runtime_error(throw_msg);
         }
 #else
         if (setsockopt(_socket, IPPROTO_IP, IP_ADD_MEMBERSHIP, &imr, sizeof(imr)) != 0)
         {
+            std::string throw_msg = std::string("setsockopt IP_ADD_MEMBERSHIP failed, errno = ")
+                + getErrorAsString();
             close();
-            throw std::runtime_error(std::string("setsockopt IP_ADD_MEMBERSHIP failed, errno = ")
-                + strerror(errno) + " (" + std::to_string(errno) + ")");
+            throw std::runtime_error(throw_msg);
         }
 
 #endif
     }
 
-    void closeSocket(SOCKET_TYPE& socket_to_close)
+    void closeSocket(SOCKET_TYPE* socket_to_close)
     {
 #ifdef WIN32
-        closesocket(socket_to_close);
+        closesocket(*socket_to_close);
 #else //WIN32
-        ::close(socket_to_close);
+        ::close(*socket_to_close);
 #endif
     }
 
@@ -839,7 +896,7 @@ public:
         if (_socket > 0)
         {
             // close socket
-            closeSocket(_socket);
+            closeSocket(&_socket);
         }
 
         _socket = 0;
@@ -860,50 +917,74 @@ public:
             throw std::runtime_error("invalid data size");
         }
         // 1. create UDP socket
-        SOCKET_TYPE fd = socket(AF_INET, SOCK_DGRAM, 0);
+        SOCKET_TYPE fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
         if (fd < 0)
         {
-            closeSocket(fd);
-            throw std::runtime_error(std::string("create socket failed, errno = ")
-                + strerror(errno) + " (" + std::to_string(errno) + ")");
+            std::string throw_msg = std::string("create socket failed, errno = ")
+                + getErrorAsString();
+            closeSocket(&fd);
+            throw std::runtime_error(throw_msg);
         }
 
         // 2. bind socket
         struct sockaddr_in addr;
+        memset(&addr, 0, sizeof(addr));
         addr.sin_family = AF_INET;
         addr.sin_addr.s_addr = address;
         if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0)
         {
-            closeSocket(fd);
-            throw std::runtime_error(std::string("bind failed, errno = ")
-                + strerror(errno) + " (" + std::to_string(errno) + ")");
+            std::string throw_msg = std::string("bind to address ")
+                                    + inet_ntoa(addr.sin_addr)
+                                    + std::string(" failed, errno =  ")
+                                    + getErrorAsString();
+            closeSocket(&fd);
+            throw std::runtime_error(throw_msg);
         }
 
-        // 3. disable IP_MULTICAST_LOOP
-        char opt = 0;
-        if (setsockopt(fd, IPPROTO_IP, IP_MULTICAST_LOOP, &opt, sizeof(opt)) < 0)
+        // 3. enable IP_MULTICAST_LOOP for us, because we want that if the 
+        //    option "send to myself is set"
+        if (LSSDP_SEND_TO_LOCALHOST)
         {
-            closeSocket(fd);
-            throw std::runtime_error(std::string("setsockopt IP_MULTICAST_LOOP failed, errno = ")
-                + strerror(errno) + " (" + std::to_string(errno) + ")");
+            int opt = 1;
+#ifdef WIN32
+            const char* value_to_set = (const char*)&opt;
+#else
+            int* value_to_set = &opt;
+#endif
+
+            if (setsockopt(fd, IPPROTO_IP, IP_MULTICAST_LOOP, value_to_set, sizeof(opt)) != 0)
+            {
+                std::string throw_msg = std::string("setsockopt IP_MULTICAST_LOOP failed, errno = ")
+                    + getErrorAsString();
+                closeSocket(&fd);
+                throw std::runtime_error(throw_msg);
+            }
         }
 
         // 4. set destination address
         struct sockaddr_in dest_addr;
+        memset(&dest_addr, 0, sizeof(dest_addr));
         dest_addr.sin_family = AF_INET;
         dest_addr.sin_port = htons(port);
         dest_addr.sin_addr.s_addr = _multicast_socket_addr;
-
+        
         // 5. send data
-        if (sendto(fd, data, (int)data_len, 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr)) == -1)
+        int send_data_size = sendto(fd, data, (int)data_len, 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+        if (send_data_size < 0)
         {
-            closeSocket(fd);
-            throw std::runtime_error(std::string("sendto ") + inet_ntoa(dest_addr.sin_addr) + ":" + std::to_string(port) 
+            std::string throw_msg = std::string("sendto ") + inet_ntoa(addr.sin_addr) + ":" + std::to_string(port) 
+                + " for multicast address "+ inet_ntoa(dest_addr.sin_addr) + ":" + std::to_string(port)
                 + " failed, errno = "
-                + strerror(errno) + " (" + std::to_string(errno) + ")");
+                + getErrorAsString();
+            closeSocket(&fd);
+            throw std::runtime_error(throw_msg);
         }
-
-        closeSocket(fd);
+        else
+        {
+            LSSDP_LOG_DEBUG_MESSAGE(std::to_string(send_data_size) + " size sent");
+        }
+        
+        closeSocket(&fd);
     }
 
     std::pair<bool, LSSDPPacket> receivePacket()
@@ -919,18 +1000,20 @@ public:
         memset(&address, 0, sizeof(address));
         socklen_t address_len = sizeof(struct sockaddr_in);
 
-        size_t recv_len = recvfrom(_socket, buffer, sizeof(buffer), 0, (struct sockaddr *)&address, &address_len);
+        ssize_t recv_len = recvfrom(_socket, buffer, sizeof(buffer), 0, (struct sockaddr *)&address, &address_len);
         if (recv_len < 0)
         {
+            LSSDP_LOG_DEBUG_MESSAGE("receive lower 0");
             if (errno)
             {
                 throw std::runtime_error(std::string("recvfrom ") + inet_ntoa(*(in_addr*)&_multicast_socket_addr)
                     + " failed, errno = "
-                    + strerror(errno) + " (" + std::to_string(errno) + ")");
+                    + getErrorAsString());
             }
         }
         else if (recv_len == 0)
         {
+            LSSDP_LOG_DEBUG_MESSAGE("receive 0");
             //socket has been closed
         }
         else
@@ -1072,8 +1155,9 @@ struct Service::Impl : public ServiceDescription
         byebye
     };
 
-    void sendNotify(MessageType m_type)
+    bool sendNotify(MessageType m_type)
     {
+        bool error_occured = false;
         updateNetworkInterfaces();
         const char* message_to_send = _notify_alive_message.c_str();
         if (m_type == byebye)
@@ -1082,7 +1166,7 @@ struct Service::Impl : public ServiceDescription
         }
         for (const auto& current_interface : _network_interfaces)
         {
-            if (!_send_to_localhost)
+            if (!LSSDP_SEND_TO_LOCALHOST)
             {
                 if (current_interface.getIp4() == LSSDP_ADDR_LOCALHOST)
                 {
@@ -1095,17 +1179,20 @@ struct Service::Impl : public ServiceDescription
                     current_interface.getAddrIp4(),
                     _port);
             }
-            catch (const std::runtime_error&)
+            catch (std::runtime_error& ex)
             {
-                //"could not sent to"
-                //we catch only our own
+                error_occured = true;
+                _send_errors[current_interface.getIp4()] = ex.what();
             }
         }
+        return (!error_occured);
     }
 
-    void sendResponse(uint32_t address_to)
+    bool sendResponse(uint32_t address_to)
     {
+        bool error_occured = false;
         bool found = false;
+        std::string found_address;
         // 1. find the interface which is in LAN
         for (const auto& intf : _network_interfaces)
         {
@@ -1113,28 +1200,44 @@ struct Service::Impl : public ServiceDescription
                 == (address_to & intf.getAddrNetMaskIp4()))
             {
                 found = true;
+                found_address = intf.getIp4();
             }
         }
 
         if (!found)
         {
-            //did not found that this is in my network
-            //do not know what that mean
-            return;
+            return true;
         }
-        
-        _multicast_socket.sendDataTo(_response_message.c_str(),
-            address_to,
-            _port);
-        LSSDP_LOG_DEBUG_MESSAGE(std::string("send response: ") + _response_message);
+
+        try
+        {
+            _multicast_socket.sendDataTo(_response_message.c_str(),
+                address_to,
+                _port);
+        }
+        catch (std::runtime_error& ex)
+        {
+            error_occured = true;
+            _send_errors[found_address] = ex.what();
+        }
+        LSSDP_LOG_DEBUG_MESSAGE(std::string("send response: ") + response_message_generic);
+        return (!error_occured);
+    }
+
+    std::string getSendErrors()
+    {
+        std::string created_message;
+        for (const auto& current : _send_errors)
+        {
+            created_message += current.second;
+        }
+        _send_errors.clear();
+        return created_message;
     }
     
 
 private:
     friend class Service;
-
-    bool _rcv_packetes_from_myself = true;
-    bool _send_to_localhost = true;
 
     uint16_t _port = 0;
     uint32_t _address = 0;
@@ -1148,6 +1251,7 @@ private:
 
     std::vector<NetworkInterface>   _network_interfaces;
     NonBlockingMulticastSocket      _multicast_socket;
+    std::map<std::string, std::string> _send_errors;
 
 };
 
@@ -1178,14 +1282,14 @@ Service::~Service()
 {
 }
 
-void Service::sendNotifyAlive()
+bool Service::sendNotifyAlive()
 {
-    _impl->sendNotify(Impl::alive);
+    return _impl->sendNotify(Impl::alive);
 }
 
-void Service::sendNotifyByeBye()
+bool Service::sendNotifyByeBye()
 {
-    _impl->sendNotify(Impl::byebye);
+    return _impl->sendNotify(Impl::byebye);
 }
 
 bool Service::checkForMSearchAndSendResponse(std::chrono::milliseconds timeout)
@@ -1200,16 +1304,28 @@ bool Service::checkForMSearchAndSendResponse(std::chrono::milliseconds timeout)
     auto begin_time = std::chrono::system_clock::now();
     bool return_value = true;
     bool go_ahead = true;
+    bool error_while_sending = false;
+
     do
     {
-        int ret = select(_impl->_multicast_socket._socket + 1, &fs, NULL, NULL, &tv);
+        #ifdef WIN32
+        int used_socket_in_select = 0;
+        #else
+        int used_socket_in_select = _impl->_multicast_socket._socket + 1;
+        #endif
+        int ret = select(used_socket_in_select, &fs, NULL, NULL, &tv);
         if (ret < 0)
         {
+            std::string error_msg = std::string("select on ") + _impl->_dicover_url
+                + " failed, errno = "
+                + getErrorAsString();
+            _impl->_send_errors[_impl->_dicover_url] = error_msg;
             go_ahead = false;
             return_value = false;
         }
         else if (ret == 0)
         {
+            FD_SET(_impl->_multicast_socket._socket, &fs);
             //we check for the overall timeout at the and of the loop
             go_ahead = true;
         }
@@ -1223,7 +1339,10 @@ bool Service::checkForMSearchAndSendResponse(std::chrono::milliseconds timeout)
                     if (strcmp(packet.second._st, LSSDP_SEARCH_TARGET_ALL) == 0
                         || strcmp(packet.second._st, _impl->getSearchTarget().c_str()) == 0)
                     {
-                        _impl->sendResponse(packet.second._received_from);
+                        if (!_impl->sendResponse(packet.second._received_from))
+                        {
+                            error_while_sending = true;
+                        }
                     }
                 }
             }
@@ -1236,7 +1355,7 @@ bool Service::checkForMSearchAndSendResponse(std::chrono::milliseconds timeout)
         }
 
     } while (go_ahead);
-    return return_value;
+    return (return_value && !error_while_sending);
 }
 
 bool Service::operator==(const ServiceDescription& other) const
@@ -1248,6 +1367,12 @@ ServiceDescription Service::getServiceDescription() const
 {
     return *_impl;
 }
+
+std::string Service::getLastSendErrors() const
+{
+    return _impl->getSendErrors();
+}
+
 
 
 
@@ -1283,7 +1408,7 @@ public:
     {
          cxxurl::Url url(discover_url);
 
-         _port = std::stoi(url.port());
+         _port = static_cast<uint16_t>(std::stoi(url.port()));
 
          //very important !! this must be an IP address ... we check that
          if (url.ip_version() != 4)
@@ -1335,8 +1460,9 @@ public:
         }
     }
 
-    void sendMSearch()
+    bool sendMSearch()
     {
+        bool error_occured = false;
         updateNetworkInterfaces();
         for (const auto& current_interface : _network_interfaces)
         {
@@ -1353,12 +1479,24 @@ public:
                     current_interface.getAddrIp4(),
                     _port);
             }
-            catch (const std::runtime_error&)
+            catch (const std::runtime_error& ex)
             {
-                //"could not sent to"
-                //we catch only our own
+                error_occured = true;
+                _send_errors[current_interface.getIp4()] = ex.what();
             }
         }
+        return (!error_occured);
+    }
+
+    std::string getSendErrors() 
+    {
+        std::string created_message;
+        for (const auto& current : _send_errors)
+        {
+            created_message += current.second;
+        }
+        _send_errors.clear();
+        return created_message;
     }
 
 private:
@@ -1377,6 +1515,8 @@ private:
 
     std::vector<NetworkInterface>   _network_interfaces;
     NonBlockingMulticastSocket      _multicast_socket;
+
+    std::map<std::string, std::string> _send_errors;
 };
 
 ServiceFinder::~ServiceFinder()
@@ -1401,9 +1541,9 @@ std::string ServiceFinder::getUrl() const
     return _impl->_discover_url;
 }
 
-void ServiceFinder::sendMSearch()
+bool ServiceFinder::sendMSearch()
 {
-    _impl->sendMSearch();
+    return _impl->sendMSearch();
 }
 
 void ServiceFinder::checkNetworkChanges()
@@ -1426,14 +1566,24 @@ bool ServiceFinder::checkForServices(const std::function<void(const ServiceUpdat
     bool go_ahead = true;
     do
     {
-        int ret = select(_impl->_multicast_socket._socket + 1, &fs, NULL, NULL, &tv);
+        #ifdef WIN32
+        int used_socket_in_select = 0;
+        #else
+        int used_socket_in_select = _impl->_multicast_socket._socket + 1;
+        #endif
+        int ret = select(used_socket_in_select, &fs, NULL, NULL, &tv);
         if (ret < 0)
         {
+            std::string error_msg = std::string("select on ") + _impl->_discover_url
+                + " failed, errno = "
+                + getErrorAsString();
+            _impl->_send_errors[_impl->_discover_url] = error_msg;
             go_ahead = false;
             return_value = false;
         } 
         else if (ret == 0)
         {
+            FD_SET(_impl->_multicast_socket._socket, &fs);
             //we check for the overall timeout at the and of the loop
             go_ahead = true;
         }
@@ -1507,6 +1657,11 @@ bool ServiceFinder::checkForServices(const std::function<void(const ServiceUpdat
         
     } while (go_ahead);
     return return_value;
+}
+
+std::string ServiceFinder::getLastSendErrors() const 
+{
+    return _impl->getSendErrors();
 }
 
 } //namespace lssdp

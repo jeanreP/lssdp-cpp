@@ -45,3 +45,5 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/lssdpcpp-config.cmake
               ${CMAKE_CURRENT_BINARY_DIR}/lssdpcpp-config-version.cmake
         DESTINATION lib/cmake)
 install(EXPORT lssdpcpp FILE lssdpcpp_targets.cmake DESTINATION lib/cmake)
+install(FILES Readme.md LICENSE changelog.md 
+        DESTINATION .)

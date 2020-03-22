@@ -66,10 +66,20 @@ int main (int argc, char* argv[])
                 if ((now - last_time) >= send_alive_interval)
                 {
                     last_time = now;
-                    my_service.sendNotifyAlive();
+                    if (!my_service.sendNotifyAlive())
+                    {
+                        std::cout << std::string("error while sending notify") << std::endl;
+                        std::cout << my_service.getLastSendErrors() << std::endl;
+                        std::cout << std::string("service_command>");
+                    }
                 }
                 // this will return on timeout or on socket closure
-                my_service.checkForMSearchAndSendResponse(std::chrono::seconds(1));
+                if (!my_service.checkForMSearchAndSendResponse(std::chrono::seconds(1)))
+                {
+                    std::cout << std::string("error while responding") << std::endl;
+                    std::cout << my_service.getLastSendErrors() << std::endl;
+                    std::cout << std::string("service_command>");
+                }
 
                 // somebody needs to set keep_running to false to end loop!
 
@@ -84,6 +94,7 @@ int main (int argc, char* argv[])
         {
             std::cout << std::string("exeption occured") << std::endl;
             std::cout << std::string(e.what()) << std::endl;
+            std::cout << std::string("service_command>");
 
             loop_ready.set_value(false);
         }

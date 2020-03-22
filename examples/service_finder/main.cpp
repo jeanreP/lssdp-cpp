@@ -55,7 +55,12 @@ int main(int argc, char* argv[])
             auto last_time = std::chrono::system_clock::now();
 
             // send search first
-            my_finder.sendMSearch();
+            if (!my_finder.sendMSearch())
+            {
+                std::cout << std::string("sending of MSearch failed") << std::endl;
+                std::cout << my_finder.getLastSendErrors() << std::endl;
+                std::cout << std::string("service_command>");
+            }
 
             do
             {

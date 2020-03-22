@@ -361,8 +361,10 @@ public:
      * 
      * @remark The *NOTIFY* messages will NOT contain "UPnP/1.1" 
      *         as version within the *SERVER:* tag!
+     * @retval true sent notify without errors
+     * @retval false sent notify with errors, check with getLastSendErrors
      */
-    void sendNotifyAlive();
+    bool sendNotifyAlive();
     /**
      * @brief Will send a *NOTIFY* message to all
      *        networks that the service is shuting down.
@@ -370,8 +372,10 @@ public:
      * 
      * @remark The *NOTIFY* messages will NOT contain "UPnP/1.1" 
      *         as version within the *SERVER:* tag!
+     * @retval true sent notify without errors
+     * @retval false sent notify with errors, check with getLastSendErrors
      */
-    void sendNotifyByeBye();
+    bool sendNotifyByeBye();
     /**
      * @brief check for a *M-SEARCH* messages and response if *search target (ST)* 
      *        and optionally *device type (DEV_TYPE)* matches
@@ -399,6 +403,13 @@ public:
      * @return the current setup of this service
      */
     ServiceDescription getServiceDescription() const;
+
+    /**
+     * @brief Get send errors if search fails to one of the networkinterfaces
+     *
+     * @return the send errors
+     */
+    std::string getLastSendErrors() const;
 
 private:
     struct Impl;
@@ -525,8 +536,10 @@ public:
      * @remark The *M-SEARCH* messages will NOT contain "UPnP/1.1" 
      *         as version within the *USER-AGENT:* tag!
      * 
+     * @retval true sent notify without errors
+     * @retval false sent notify with errors, check with getLastSendErrors
      */
-    void sendMSearch();
+    bool sendMSearch();
     /**
      * @brief check for network interface changes explicitely.
      *        sendMSearch will usually check for that, but if you do not want to
@@ -554,6 +567,13 @@ public:
      * @return the discovery Url 
      */
     std::string getUrl() const;
+
+    /**
+     * @brief Get send errors if search fails to one of the networkinterfaces
+     *
+     * @return the send errors
+     */
+    std::string getLastSendErrors() const;
 
 private:
     class Impl;
