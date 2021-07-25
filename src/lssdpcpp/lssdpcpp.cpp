@@ -1299,7 +1299,6 @@ bool Service::checkForMSearchAndSendResponse(std::chrono::milliseconds timeout)
     FD_SET(_impl->_multicast_socket._socket, &fs);
     struct timeval tv;
     memset(&tv, 0, sizeof(tv));
-    tv.tv_usec = 100 * 1000;   // 100 ms
 
     auto begin_time = std::chrono::system_clock::now();
     bool return_value = true;
@@ -1313,6 +1312,7 @@ bool Service::checkForMSearchAndSendResponse(std::chrono::milliseconds timeout)
         #else
         int used_socket_in_select = _impl->_multicast_socket._socket + 1;
         #endif
+        tv.tv_usec = 100 * 1000;   // 100 ms
         int ret = select(used_socket_in_select, &fs, NULL, NULL, &tv);
         if (ret < 0)
         {
@@ -1559,7 +1559,6 @@ bool ServiceFinder::checkForServices(const std::function<void(const ServiceUpdat
     FD_SET(_impl->_multicast_socket._socket, &fs);
     struct timeval tv;
     memset(&tv, 0, sizeof(tv));
-    tv.tv_usec = 100 * 1000;   // 100 ms
 
     auto begin_time = std::chrono::system_clock::now();
     bool return_value = true;
@@ -1571,6 +1570,7 @@ bool ServiceFinder::checkForServices(const std::function<void(const ServiceUpdat
         #else
         int used_socket_in_select = _impl->_multicast_socket._socket + 1;
         #endif
+        tv.tv_usec = 100 * 1000;   // 100 ms
         int ret = select(used_socket_in_select, &fs, NULL, NULL, &tv);
         if (ret < 0)
         {
