@@ -750,7 +750,7 @@ public:
     {
         close();
     }
-    void open(uint32_t multicast_socket_addr, uint16_t multicast_socket_port)
+    void open(uint32_t multicast_socket_addr, uint16_t multicast_socket_port, const std::vector<NetworkInterface>& interfaces)
     {
         Initializer::init();
 
@@ -854,30 +854,33 @@ public:
         memset(&multicast_address, 0, sizeof(multicast_address));
         multicast_address.s_addr = multicast_socket_addr;
 
-        // set IP_ADD_MEMBERSHIP
-        struct ip_mreq imr;
-        memset(&imr, 0, sizeof(imr));
-        imr.imr_multiaddr.s_addr = multicast_address.s_addr;
-        imr.imr_interface.s_addr = htonl(INADDR_ANY);
-        
+        for (const auto& intf : interfaces)
+        {
+            // set IP_ADD_MEMBERSHIP
+            struct ip_mreq imr;
+            memset(&imr, 0, sizeof(imr));
+            imr.imr_multiaddr.s_addr = multicast_address.s_addr;
+            imr.imr_interface.s_addr = intf.getAddrIp4();
+
 #ifdef WIN32
-        if (setsockopt(_socket, IPPROTO_IP, IP_ADD_MEMBERSHIP, (const char*)&imr, sizeof(imr)) != 0)
-        {
-            std::string throw_msg = std::string("setsockopt IP_ADD_MEMBERSHIP failed, errno = ")
-                + getErrorAsString();
-            close();
-            throw std::runtime_error(throw_msg);
-        }
+            if (setsockopt(_socket, IPPROTO_IP, IP_ADD_MEMBERSHIP, (const char*)&imr, sizeof(imr)) != 0)
+            {
+                std::string throw_msg = std::string("setsockopt IP_ADD_MEMBERSHIP failed, errno = ")
+                    + getErrorAsString();
+                close();
+                throw std::runtime_error(throw_msg);
+            }
 #else
-        if (setsockopt(_socket, IPPROTO_IP, IP_ADD_MEMBERSHIP, &imr, sizeof(imr)) != 0)
-        {
-            std::string throw_msg = std::string("setsockopt IP_ADD_MEMBERSHIP failed, errno = ")
-                + getErrorAsString();
-            close();
-            throw std::runtime_error(throw_msg);
-        }
+            if (setsockopt(_socket, IPPROTO_IP, IP_ADD_MEMBERSHIP, &imr, sizeof(imr)) != 0)
+            {
+                std::string throw_msg = std::string("setsockopt IP_ADD_MEMBERSHIP failed, errno = ")
+                    + getErrorAsString();
+                close();
+                throw std::runtime_error(throw_msg);
+            }
 
 #endif
+        }
     }
 
     void closeSocket(SOCKET_TYPE* socket_to_close)
@@ -1131,7 +1134,7 @@ struct Service::Impl : public ServiceDescription
 
     void openSocket()
     {
-        _multicast_socket.open(_address, _port);
+        _multicast_socket.open(_address, _port, _network_interfaces);
     }
 
     void closeSocket()
@@ -1442,7 +1445,7 @@ public:
 
     void openSocket()
     {
-        _multicast_socket.open(_address, _port);
+        _multicast_socket.open(_address, _port, _network_interfaces);
     }
 
     void closeSocket()
