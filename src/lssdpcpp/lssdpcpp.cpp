@@ -226,13 +226,13 @@ struct LSSDPPacket
         // 1. compare SSDP Method Header: M-SEARCH, NOTIFY, RESPONSE
         size_t i;
         if ((i = strlen(LSSDP_HEADER_MSEARCH)) < data_len && memcmp(data, LSSDP_HEADER_MSEARCH, i) == 0) {
-            strcpy(_method, LSSDP_MSEARCH);
+            strcpy_s(_method, sizeof(_method), LSSDP_MSEARCH);
         }
         else if ((i = strlen(LSSDP_HEADER_NOTIFY)) < data_len && memcmp(data, LSSDP_HEADER_NOTIFY, i) == 0) {
-            strcpy(_method, LSSDP_NOTIFY);
+            strcpy_s(_method, sizeof(_method), LSSDP_NOTIFY);
         }
         else if ((i = strlen(LSSDP_HEADER_RESPONSE)) < data_len && memcmp(data, LSSDP_HEADER_RESPONSE, i) == 0) {
-            strcpy(_method, LSSDP_RESPONSE);
+            strcpy_s(_method, sizeof(_method), LSSDP_RESPONSE);
         }
         else
         {
