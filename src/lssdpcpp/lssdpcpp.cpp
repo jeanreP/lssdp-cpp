@@ -254,10 +254,7 @@ struct LSSDPPacket
 
     private:
     #ifdef WIN32
-        size_t strncasecmp(const char* src, const char* dest, size_t len)
-        {
-            return _strnicmp(src, dest, len);
-        }
+        #define strncasecmp _strnicmp
     #endif 
 
     bool parse_field_line(const char * data, size_t start, size_t end) {
