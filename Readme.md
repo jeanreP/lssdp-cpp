@@ -28,7 +28,7 @@ _____________________________________________________
 
 ## Tested Platforms
 
-* Linux Ubuntu 16.04 with gcc 5.4
+* Linux Ubuntu 18.04 with gcc 7.5
 * Windows 10 x64 with VC++ 2019
 
 _____________________________________________________
@@ -185,7 +185,7 @@ If you do not setup any filter, each kind of service is discovered and updated v
 * *search_target:* Define the search target you are looking for. The *ServiceFinder* will react only on notifications and responses of this type and will send *M-SEARCH* messages only for this type. If not set *ssdp:all* will be used for *M-SEARCH*.
 
 
-Additionally, this implementation will also contain some a optional fields:
+Additionally, this implementation will also contain some optional fields:
 * *device_type* Device type of the device will be added to the *M-SEARCH* message as *DEV_TYPE:*. If setup the *ServiceFinder* will only react to responses and notififactions containing this device type.
 
 #### 2. start search and check for responding and notifications

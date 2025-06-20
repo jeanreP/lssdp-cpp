@@ -34,7 +34,7 @@ int main (int argc, char* argv[])
 
     lssdp::Service my_service("http://239.255.255.250:1900", //discovery_url
         std::chrono::seconds(1800), //max_age
-        "http://192.168.1.34:9092", //location_url
+        "http://192.168.1.39:9092", //location_url
         "service_uid_1", //unique_service_identifier
         "my_search_target", //search_target
         "MyProductName", //product_name
